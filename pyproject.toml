@@ -1,0 +1,62 @@
+[project]
+name = "experiments_on_models"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Nikita Savvin", email = "nikita.vsav@gmail.com"},
+]
+dependencies = [
+    "pytest>=8.1.1",
+    "tox==4.14.2",
+    "pre-commit>=3.6.2",
+    "pytest-cov>=4.1.0",
+    "coverage-badge>=1.1.0",
+    "pdm-bump>=0.7.3",
+    "pydantic>=2.6.3",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+    "pandas>=2.2.1",
+    "coverage==7.4.4",
+#    "psycopg2>=2.9.10",
+    "psycopg2-binary>=2.9.10",
+    "tensorflow>=2.18.0",
+    "scikit-learn>=1.6.1",
+    "plotly>=6.0.0",
+    "openpyxl>=3.1.5",
+    "pydot>=3.0.4",
+    "torch>=2.6.0",
+    "tqdm>=4.67.1",
+    "xgboost>=3.0.0",
+    "matplotlib>=3.10.1",
+    "pmdarima<2.0",
+    "tslearn>=0.6.3",
+    "shap>=0.47.0",
+]
+requires-python = ">=3.12"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+
+[tool.pdm]
+distribution = true
+
+[tool.pytest.ini_options]
+disable_test_id_escaping_and_forfeit_all_rights_to_community_support = true
+addopts = [
+    "--import-mode=importlib",
+]
+testpaths = [
+    "tests",
+]
+timeout = 300
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "unit_transform",
+]
+pythonpath = [
+    "src",
+]
