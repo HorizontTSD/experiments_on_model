@@ -1,5 +1,4 @@
 import os
-import psycopg2
 import requests
 import pandas as pd
 

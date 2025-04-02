@@ -13,7 +13,7 @@ from config import logger
 from datetime import datetime
 from plotly.subplots import make_subplots
 from torch.utils.data import TensorDataset, DataLoader, Dataset
-from utils.api_cals import vectorization_request, decoding_request, fetch_data_from_db
+from utils.api_cals import vectorization_request, decoding_request
 
 
 ssl._create_default_https_context = ssl._create_stdlib_context
@@ -211,7 +211,7 @@ class TimeSeriesTransformer(nn.Module):
         return self.fc(x)
 
 
-df_init = fetch_data_from_db()
+df_init = pd.read_csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vRFF6SXvGbQgQG1bh0hwbXgVWpUU_UG8OQAVhHcNAcAFT5x-XoIYxMAeF-goym6_wNhJEwQd3iGHp9b/pub?gid=791211028&single=true&output=csv')
 
 df_init['datetime'] = df_init['datetime'].dt.strftime('%Y-%m-%d %H:%M:%S')
 
