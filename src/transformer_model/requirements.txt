@@ -1,0 +1,9 @@
+pandas
+numpy
+matplotlib
+scikit-learn
+torch
+pytorch-lightning
+neuralforecast
+ray[tune]
+optuna
