@@ -205,7 +205,7 @@ df_filtered_hist = predict_data[important_features]
 
 def config_fn(trial):
     early_stop_callback = EarlyStopping(
-        monitor="val_loss",   # метрика, по которой будет происходить остановка
+        monitor="valid_loss",   # метрика, по которой будет происходить остановка
         patience=5,           # сколько эпох ждать без улучшения
         mode="min",           # минимизация (например, для ошибки)
         verbose=True
