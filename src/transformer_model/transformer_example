@@ -38,7 +38,7 @@ from neuralforecast.models import TimesNet, MLP, NBEATS, RNN, TSMixer, NHITS, NB
 from neuralforecast.losses.pytorch import MAE, RMSE, MSE, MAPE, DistributionLoss
 from neuralforecast.losses.numpy import mae
 from neuralforecast.tsdataset import TimeSeriesDataset
-from neuralforecast.auto import AutoTFT  # Автоматический подбор параметров для TFT
+from neuralforecast.auto import AutoTFT  
 
 # Оптимизация с помощью Ray Tune и Optuna
 from ray import tune
@@ -57,9 +57,9 @@ def create_features(df, column):
     df = df.copy()
     
     df['time'] = df['time'].dt.tz_localize(None)
-    df['second'] = df['time'].dt.second  # Добавляет столбец с секундой
-    df['minute'] = df['time'].dt.minute  # Добавляет столбец с минутой
-    df['hour'] = df['time'].dt.hour      # Добавляет столбец с часом
+    df['second'] = df['time'].dt.second  
+    df['minute'] = df['time'].dt.minute  
+    df['hour'] = df['time'].dt.hour      
     df['dayofweek'] = df['time'].dt.dayofweek
     df['quarter'] = df['time'].dt.quarter
     df['month'] = df['time'].dt.month
