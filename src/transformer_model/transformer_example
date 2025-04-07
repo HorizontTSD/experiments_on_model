@@ -1,0 +1,257 @@
+import os
+import ssl
+import math
+import torch
+import shutil
+import numpy as np
+import torch.nn as nn
+import torch.optim as optim
+import plotly.graph_objects as go
+
+from tqdm import tqdm
+from config import logger
+from datetime import datetime
+from plotly.subplots import make_subplots
+from torch.utils.data import TensorDataset, DataLoader, Dataset
+from utils.api_cals import vectorization_request, decoding_request, fetch_data_from_db
+
+# Стандартные библиотеки
+import os
+import time
+from math import sqrt
+from uuid import uuid4
+from datetime import datetime, timedelta
+
+# Работа с данными
+import pandas as pd
+import numpy as np
+
+# Визуализация
+import matplotlib.pyplot as plt
+
+# Оценка качества моделей
+from sklearn.metrics import mean_squared_error, mean_absolute_percentage_error
+
+# NeuralForecast
+from neuralforecast import NeuralForecast
+from neuralforecast.models import TimesNet, MLP, NBEATS, RNN, TSMixer, NHITS, NBEATSx, TFT
+from neuralforecast.losses.pytorch import MAE, RMSE, MSE, MAPE, DistributionLoss
+from neuralforecast.losses.numpy import mae
+from neuralforecast.tsdataset import TimeSeriesDataset
+from neuralforecast.auto import AutoTFT  # Автоматический подбор параметров для TFT
+
+# Оптимизация с помощью Ray Tune и Optuna
+from ray import tune
+from ray.tune.search.optuna import OptunaSearch
+
+# Callbacks для обучения
+from pytorch_lightning.callbacks import EarlyStopping
+
+
+HORIZON = 288
+BATCH_SIZE = 1
+measurement = 'load_consumption'
+
+def create_features(df, column):
+    # Создаем копию DataFrame
+    df = df.copy()
+    
+    df['time'] = df['time'].dt.tz_localize(None)
+    df['second'] = df['time'].dt.second  # Добавляет столбец с секундой
+    df['minute'] = df['time'].dt.minute  # Добавляет столбец с минутой
+    df['hour'] = df['time'].dt.hour      # Добавляет столбец с часом
+    df['dayofweek'] = df['time'].dt.dayofweek
+    df['quarter'] = df['time'].dt.quarter
+    df['month'] = df['time'].dt.month
+    df['dayofyear'] = df['time'].dt.dayofyear
+    df['dayofmonth'] = df['time'].dt.day
+  
+    return df
+
+def timeseries(df, column):
+    # Создаем копию и работаем с ней
+    df = df.copy()
+    df = df.set_index('time')  # Исправлено: data -> df
+    df.index = pd.to_datetime(df.index)
+    df = df.sort_index()
+    return df
+
+def add_lags(df, column):
+    df = df.copy()
+    # Создаем lag-фичи
+    lags = [1, 2, 3, 5, 7, 9, 11, 15, 20]
+    for lag in lags:
+        df[f'lag_{lag}'] = df[column].shift(lag)
+    return df
+    
+def delete_empty_rows(df, column):
+    # Преобразуем колонку в float, чтобы сохранить значения типа 0.68
+    df[price_column] = df[column].astype(float)
+
+    # Найти индекс первого точного нуля (0.0), исключая значения типа 0.68, 0.6 и т. д.
+    idx = df[df[price_column] == 0.0].index.min()
+
+    # Удалить строки начиная с первого нуля до конца
+    if pd.notna(idx):
+        df = df.iloc[:idx]
+    
+    return df
+
+
+df_init = fetch_data_from_db()
+
+df_init = df_init.rename(columns={"datetime": "time"})
+
+data = create_features(df_init, measurement)
+data = add_lags(data, measurement)
+data = data.fillna(0)
+
+#Подготовка датасета к NeuralForecast
+# Преобразуем все колонки в float, кроме 'timestamp'
+data.iloc[:, 1:] = data.iloc[:, 1:].apply(pd.to_numeric)
+
+data = data.rename(columns={"time": "ds"})
+
+predict_data = data
+
+predict_data['unique_id'] = "consumption"
+
+predict_data['ds'] = pd.to_datetime(predict_data['ds'])
+
+# Удаляем определенные колонки для экхогенных факторов
+column_exo = predict_data.columns.tolist()
+
+
+columns_to_remove = ['unique_id','ds', measurement]
+
+filtered_columns_exo = [col for col in column_exo if col not in columns_to_remove]
+
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+# Initialize TFT model without the device parameter
+tft = TFT(
+    h=HORIZON, 
+    input_size=HORIZON, 
+    loss=RMSE(),
+    max_steps=100, 
+    val_check_steps=10,
+    early_stop_patience_steps=3,
+    hist_exog_list=filtered_columns_exo,
+    # accelerator='gpu',  # Указываем использование GPU
+    # devices=1,  # Количество GPU устройств для использования
+    windows_batch_size=HORIZON,
+    batch_size=BATCH_SIZE,  # Устанавливаем размер батча
+    learning_rate=0.001,    # Можно настроить скорость обучения
+    # Добавьте эти параметры для управления памятью GPU
+    gradient_clip_val=0.5,
+    accelerator='cpu', # Try this parameter instead of device
+    devices=1  # For CPU, we specify 1 device
+    # Remove the device parameter
+)
+
+# Initialize NeuralForecast with the model
+nf = NeuralForecast(models=[tft], freq='5T')
+
+# When calling fit, make sure to use the correct parameters
+# nf.fit(df=predict_data, val_size=HORIZON, time_col='ds', target_col=measurement)
+
+nf.fit(df=predict_data, val_size=HORIZON, time_col='ds',target_col=measurement)
+
+column_names = predict_data.columns.tolist()
+
+Y_hat_df = nf.predict()
+# Удаляем определенные колонки
+
+columns_to_remove = ['unique_id', 'ds', measurement]
+filtered_columns = [col for col in column_names if col not in columns_to_remove]
+
+
+# Вычисляем базовое RMSE
+baseline_rmse = np.sqrt(mean_squared_error(predict_data[measurement][-HORIZON:], Y_hat_df['TFT'][-HORIZON:]))
+
+# Словарь для хранения важности признаков
+feature_importance = {}
+
+for feature in filtered_columns:  # Ваши признаки
+    temp_df = predict_data.copy()
+    
+    # Сдвигаем значения признака на 1 шаг
+    temp_df[feature] = np.random.permutation(temp_df[feature].values)  # перемешиваем значения в колонке
+    
+    # Убираем строки с пропущенными значениями после сдвига
+    temp_df = temp_df.dropna(subset=[feature])
+    
+    # Повторно обучаем модель
+    nf.fit(df=temp_df, val_size=HORIZON, time_col='ds', target_col=measurement)
+    Y_hat_df_temp = nf.predict()
+    
+    # Считаем изменение ошибки
+    rmse = np.sqrt(mean_squared_error(predict_data[measurement][-HORIZON:], Y_hat_df_temp['TFT'][-HORIZON:]))
+    feature_importance[feature] = rmse - baseline_rmse
+
+# Вывод важности признаков
+print("Feature Importance:", feature_importance)
+
+threshold = 0.05  # Задайте порог, например, 0.05
+
+# Фильтруем признаки, чья важность выше порога
+important_features = [feature for feature, importance in feature_importance.items() if importance >= threshold]
+print("Important_features:", important_features)
+
+df_filtered = predict_data[['unique_id', 'ds', measurement] + important_features]  # Оставляем только важные признаки
+
+df_filtered_hist = predict_data[important_features]
+
+
+def config_fn(trial):
+    early_stop_callback = EarlyStopping(
+        monitor="valid_loss",   # метрика, по которой будет происходить остановка
+        patience=5,           # сколько эпох ждать без улучшения
+        mode="min",           # минимизация (например, для ошибки)
+        verbose=True
+    )
+    
+    return {
+        'input_size': HORIZON,
+        'accelerator': 'cpu',
+        'devices': 1,
+        'max_steps': 100,
+        'dropout': trial.suggest_float('dropout', 0.1, 0.5),
+        'learning_rate': trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True),
+        'batch_size': trial.suggest_categorical('batch_size', [1]),
+        'callbacks': [early_stop_callback],
+    }
+
+model = AutoTFT(
+    h=HORIZON,
+    config=config_fn,
+    num_samples=4, 
+    loss=RMSE(),
+    valid_loss=RMSE(),
+    refit_with_val=True,
+    cpus=4,
+    verbose=True,
+    backend='optuna'
+)
+
+nf = NeuralForecast(models=[model], freq='5T')
+
+nf.fit(df=df_filtered, val_size=HORIZON, time_col='ds',target_col=measurement)
+
+forecast = nf.predict(df=df_filtered)
+
+fig, ax = plt.subplots(figsize=(12, 6))
+
+# История
+ax.plot(df_init.tail(288)['time'], df_init.tail(288)[measurement], label='Исторические данные', color='black')
+
+# Прогноз
+ax.plot(forecast['ds'], forecast['AutoTFT'], label='AutoTFT', color='blue')
+
+ax.set_title('История и прогноз')
+ax.set_xlabel('Время')
+ax.set_ylabel('Значение')
+ax.legend()
+
+plt.tight_layout()
+plt.show()
